@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <title>Lazy‑load OME‑TIFF Viewer</title>
+  <style>
+    /* 页面与视窗 */
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #000
+    }
+
+    #view {
+      width: 100%;
+      height: 100%;
+      margin: 0 auto;
+      /* 水平居中 */
+      position: relative;
+      /* 给内部绝对定位元素用 */
+      background: #000;
+      /* 与外部一致的黑底 */
+      overflow: hidden;
+    }
+
+    #bbox {
+      pointer-events: none;
+      position: absolute;
+      border: 4px solid currentColor;
+      /* 用 color 统一颜色 */
+      background: transparent;
+      box-sizing: border-box;
+      overflow: visible;
+      /* 让 ::before 不被裁剪 */
+
+    }
+
+    #bbox::before {
+      content: attr(data-label);
+      /* data-label=... 动态填充 */
+      position: absolute;
+      top: -1.5em;
+      left: 0;
+      background: currentColor;
+      color: #fff;
+      padding: 2px 4px;
+      font-size: 12px;
+      line-height: 1;
+      border-radius: 2px;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+    /* 控制面板 */
+    #controlPanel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 99999;
+      background: rgba(255, 255, 255, .85);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-family: sans-serif;
+      font-size: 14px;
+      line-height: 0.8;
+      max-height: 90%;
+      overflow: auto;
+      box-shadow: 0 0 6px rgba(0, 0, 0, .35)
+    }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px
+    }
+
+    .control-row input[type=checkbox] {
+      margin-right: 4px
+    }
+
+    .control-row input[type=range] {
+      flex: 1;
+      margin-left: 4px
+    }
+
+    #basePathRow {
+      margin-bottom: 6px;
+      white-space: nowrap
+    }
+
+    #basePathInput {
+      width: 150px
+    }
+
+    .range:disabled {
+      opacity: .4
+    }
+
+    .control-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .control-table td {
+      padding: 4px 8px;
+      text-align: left;
+      vertical-align: middle;
+      border-bottom: 1px solid #ddd;
+    }
+  </style>
+  <script src="/static/jquery.js"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="/static/openseadragon.js"></script>
+  <script src="/static/openseadragon-scalebar.js"></script>
+  <script src="/static/openseadragon-filtering.js"></script>
+  <script src="/static/mark_bboxes.js"></script>
+
+</head>
+
+<body>
+  <div id="view"></div>
+
+  <div id="controlPanel">
+    <div id="basePathRow">Dataset: <input id="basePathInput" value="ALL-TLS_100" /></div>
+      <button id="btnMark">mark bound boxes</button>
+      <button id="btnClear">unmark bound boxes</button>
+    <div id="layerControls"></div>
+  </div>
+
+  <pre id="coords" style="position:absolute;top:6px;left:6px;
+              background:rgba(0,0,0,.55);color:#00e676;
+              padding:4px 6px;font:12px/1 monospace;z-index:9999;">
+  TL: (–, –)  BR: (–, –)
+  </pre>
+
+  <script>
+    /* ========================
+     * 配置
+     * ======================*/
+    const BASE_LAYER = 'raw_HE';
+    const channelNames = [
+      BASE_LAYER,
+      'P1_DAPI', 'P1_FCER2', 'P1_GLYCAM1', 'P1_CD3E', 'P1_LAMP3', 'P1_MS4A1', 'P1_CR2', 'P1_SampleAF',
+      'P2_DAPI', 'P2_TPSAB1', 'P2_CD68', 'P2_CD274', 'P2_HLA-DRA', 'P2_ITGAX', 'P2_CD163', 'P2_SampleAF',
+      'P3_DAPI', 'P3_ACTA2', 'P3_PANK1', 'P3_NCAM1', 'P3_MKI67', 'P3_MPO', 'P3_PECAM1', 'P3_SampleAF',
+      'P4_DAPI', 'P4_FOXP3', 'P4_IL10', 'P4_CD4', 'P4_PDCD1', 'P4_CD8A', 'P4_MS4A1', 'P4_SampleAF'
+    ];
+
+    const colorMap = {
+        P1_DAPI:    [0, 0, 255],
+        P1_FCER2:   [0, 255, 255],
+        P1_GLYCAM1: [0, 255,   0],
+        P1_CD3E:    [255, 255, 0],
+        P1_LAMP3:   [255, 165, 0],
+        P1_MS4A1:   [255,   0, 0],
+        P1_CR2:     [255, 255, 255],
+        P1_SampleAF:[169, 169, 169],
+
+        /* ---------- P2（dark 系） ---------- */
+        P2_DAPI:    [0,   0, 255],
+        P2_TPSAB1:  [0, 200, 200],
+        P2_CD68:    [0, 200,   0],
+        P2_CD274:   [200, 200, 0],
+        "P2_HLA-DRA":[205, 133, 0],
+        P2_ITGAX:   [200,   0, 0],
+        P2_CD163:   [230, 230, 230],
+        P2_SampleAF:[169, 169, 169],
+
+        /* ---------- P3（light 系） ---------- */
+        P3_DAPI:    [0,   0, 255],
+        P3_ACTA2:   [102, 255, 255],
+        P3_PANK1:   [144, 255, 144],
+        P3_NCAM1:   [255, 255, 128],
+        P3_MKI67:   [255, 200, 100],
+        P3_MPO:     [255, 102, 102],
+        P3_PECAM1:  [200, 200, 200],
+        P3_SampleAF:[169, 169, 169],
+
+        /* ---------- P4（shift 系） ---------- */
+        P4_DAPI:    [0,   0, 255],
+        P4_FOXP3:   [0, 255, 200],
+        P4_IL10:    [102, 255,   0],
+        P4_CD4:     [255, 215,   0],
+        P4_PDCD1:   [255, 140,   0],
+        P4_CD8A:    [255,  69,   0],
+        P4_MS4A1:   [245, 245, 245],
+        P4_SampleAF: [169, 169, 169]
+    };
+
+    /* ========================
+     * OpenSeadragon Init
+     * ======================*/
+    const viewer = new OpenSeadragon({
+      id: 'view', tileSources: [], prefixUrl: '/static/images/', showNavigator: true, showRotationControl: true,
+      animationTime: 0.5, blendTime: 0.1, constrainDuringPan: true, maxZoomPixelRatio: 2, minZoomImageRatio: 1,
+      visibilityRatio: 1, zoomPerScroll: 2, timeout: 120000
+    });
+
+    const mpp = parseFloat('0');
+    viewer.scalebar({ pixelsPerMeter: mpp ? 1e6 / mpp : 0, xOffset: 10, yOffset: 10, barThickness: 3, color: '#555', fontColor: '#333', backgroundColor: 'rgba(255,255,255,0.5)' });
+
+    /* ========================
+    * State & Helpers
+    * ======================*/
+    const layers = {};
+    const loadingStates = {}; // 跟踪每个图层的加载状态
+
+    // function tileUrl(basePath, name) { return `/${basePath}/${name}.ome.tif.dzi`; }
+    function tileUrl(basePath, name) {
+        const baseUrl = `/${basePath}/${name}.ome.tif.dzi`;  
+        if (colorMap[name]) {
+            const cmapParam = encodeURIComponent(`[(0,0,0), (${colorMap[name].join(',')})]`);
+            return `${baseUrl}?cmap=${cmapParam}`;
+        }
+        return baseUrl;
+    }
+
+    /**
+     * 在 #coords 元素里实时显示视窗左上 / 右下像素坐标
+     * @param {OpenSeadragon.Viewer} viewer
+     * @param {string} outputId  页面上显示坐标的元素 id
+     */
+    function attachViewportReporter(viewer, outputId = 'coords') {
+      // 如果 TileSource 已经打开，马上初始化；否则等 'open'
+      if (viewer.isOpen()) {
+        init();
+      } else {
+        viewer.addOnceHandler('open', init);     // 只触发一次就够
+      }
+
+      function init() {
+        const imgSize = viewer.world.getItemAt(0).getContentSize();  // 原图尺寸
+        const outEl = document.getElementById(outputId);
+        if (!outEl) return console.warn(`#${outputId} not found`);
+
+        // 绑定所有可能改变视窗的事件
+        ['viewport-change', 'animation', 'rotate', 'resize']
+          .forEach(ev => viewer.addHandler(ev, reportCoords));
+
+        reportCoords();   // 先跑一次，保证页面初始就有数字
+
+        /** 把当前视窗 bounds 写到 DOM 和 console */
+        function reportCoords() {
+          const b = viewer.viewport.getBounds(true);   // image-space rect
+          const tlX = Math.round(b.x * imgSize.x);
+          const tlY = Math.round(b.y * imgSize.y);
+          const brX = Math.round((b.x + b.width) * imgSize.x);
+          const brY = Math.round((b.y + b.height) * imgSize.y);
+
+          outEl.textContent =
+            `TL: (${tlX}, ${tlY})  BR: (${brX}, ${brY})`;
+
+          console.debug('Viewport bounds →', b);
+          console.debug('Viewport corners →', { tlX, tlY, brX, brY });
+        }
+      }
+    }
+
+    /**
+     * 预加载单个图层（透明度设为0，实际不可见）
+     */
+    function preloadChannel(name, isBase = false) {
+      if (loadingStates[name] === 'loading' || loadingStates[name] === 'loaded') {
+        return Promise.resolve(layers[name]);
+      }
+      
+      loadingStates[name] = 'loading';
+      const basePath = $('#basePathInput').val().replace(/\/+$/, '');
+      
+      return new Promise((resolve, reject) => {
+        viewer.addTiledImage({
+          tileSource: tileUrl(basePath, name),
+          opacity: isBase ? 1 : 0, // 基础图层可见，其他图层透明
+          success: e => {
+            layers[name] = e.item;
+            loadingStates[name] = 'loaded';
+            viewer.world.setItemIndex(e.item, channelNames.indexOf(name));
+            
+            // 启用对应的控件
+            $(`.range[data-key='${name}']`).prop('disabled', false);
+            resolve(e.item);
+          },
+          error: err => {
+            loadingStates[name] = 'error';
+            console.error('预加载失败', name, err);
+            reject(err);
+          }
+        });
+      });
+    }
+
+    /**
+     * 预加载所有图层
+     */
+    async function preloadAllChannels() {
+      console.log('开始预加载所有图层...');
+      
+      // 首先加载基础图层
+      await preloadChannel(BASE_LAYER, true);
+      
+      // 并行预加载其他图层
+      const otherChannels = channelNames.filter(name => name !== BASE_LAYER);
+      const preloadPromises = otherChannels.map(name => 
+        preloadChannel(name).catch(err => {
+          console.warn(`图层 ${name} 预加载失败，将在用户点击时重试`);
+          return null;
+        })
+      );
+      
+      try {
+        await Promise.allSettled(preloadPromises);
+        console.log('所有图层预加载完成');
+      } catch (err) {
+        console.warn('部分图层预加载失败', err);
+      }
+    }
+
+    /**
+     * 显示或隐藏图层（现在是同步操作）
+     */
+    function toggleChannel(name, show, opacity = 0.5) {
+      if (name === BASE_LAYER) return;
+      
+      if (layers[name] && loadingStates[name] === 'loaded') {
+        // 图层已加载，直接设置透明度
+        layers[name].setOpacity(show ? opacity : 0);
+      } else if (show) {
+        // 图层未加载但需要显示，立即加载
+        console.log(`图层 ${name} 未预加载，现在加载...`);
+        loadingStates[name] = 'loading';
+        
+        const basePath = $('#basePathInput').val().replace(/\/+$/, '');
+        viewer.addTiledImage({
+          tileSource: tileUrl(basePath, name),
+          opacity: opacity,
+          success: e => {
+            layers[name] = e.item;
+            loadingStates[name] = 'loaded';
+            viewer.world.setItemIndex(e.item, channelNames.indexOf(name));
+            $(`.range[data-key='${name}']`).prop('disabled', false);
+            console.log(`图层 ${name} 加载完成`);
+          },
+          error: err => {
+            loadingStates[name] = 'error';
+            console.error('加载失败', name, err);
+            // 如果加载失败，取消勾选
+            $(`.chk[data-key='${name}']`).prop('checked', false);
+          }
+        });
+      }
+    }
+
+    function initWorld() {
+      // 清理现有状态
+      for (let i = viewer.world.getItemCount() - 1; i >= 0; i--) viewer.world.removeItem(viewer.world.getItemAt(i));
+      for (const k in layers) delete layers[k];
+      for (const k in loadingStates) delete loadingStates[k];
+      
+
+      $('#layerControls').empty();
+      const table = $('<table class="control-table"></table>');
+      channelNames.forEach(name => {
+        const isBase = name === BASE_LAYER;
+        const color = colorMap[name]
+          ? `rgb(${colorMap[name].join(',')})`
+          : 'transparent';
+
+        const row = $(`
+          <tr>
+            <td>
+              <input type="checkbox" class="chk" data-key="${name}" ${isBase ? 'checked' : ''}>
+              <span class="layer-name">${name}</span>
+            </td>
+            <td>
+              <span class="color-swatch" 
+                    style="background-color: ${color};
+                          width:16px; height:16px;
+                          display:inline-block;"></span>
+            </td>
+            <td>
+              <input type="range" class="range" data-key="${name}"
+                    min="0" max="1" step="0.05" value="0.5" disabled>
+            </td>
+          </tr>`);
+
+        table.append(row);
+      });
+
+      $('#layerControls').append(table);
+      // attachViewportReporter(viewer, 'coords');
+      
+      // 启动预加载
+      preloadAllChannels();
+
+    }
+
+    // 初始化
+    initWorld();
+
+    // 基础路径改变时重新初始化
+    $('#basePathInput').on('change', () => {
+      initWorld(); 
+      $('.chk').each(function () {
+        if ($(this).data('key') !== BASE_LAYER) 
+          $(this).prop('checked', false); 
+      }); 
+    });
+
+    
+    $('#btnMark').on('click', () => {
+      const bp = $('#basePathInput').val();
+      $.getJSON(`/mark_bbox/${bp}`, data => {
+        markBoxes(data.boxes);
+      });
+    });
+    $('#btnClear').on('click', () => {
+      const bp = $('#basePathInput').val();
+      $.getJSON(`/unmark_bbox/${bp}`, () => {
+        clearMarks();
+      });
+    });
+
+    // checkbox 事件处理（现在是同步的）
+    $(document).on('change', '.chk', function () {
+      const key = $(this).data('key');
+      const range = $(`.range[data-key='${key}']`);
+      
+      if (key === BASE_LAYER) return;
+      
+      const opacity = parseFloat(range.val()) || 0.5;
+      toggleChannel(key, this.checked, opacity);
+    });
+
+    // 透明度滑块事件处理
+    $(document).on('input', '.range', function () {
+      const key = $(this).data('key');
+      const val = parseFloat(this.value);
+      
+      if (layers[key] && loadingStates[key] === 'loaded') {
+        layers[key].setOpacity(val);
+        
+        // 自动勾选checkbox如果透明度>0
+        const chk = $(`.chk[data-key='${key}']`);
+        if (val > 0 && !chk.prop('checked')) {
+          chk.prop('checked', true);
+        }
+      }
+    });
+
+
+
+
+  </script>
+</body>
+
+</html>

@@ -31,9 +31,12 @@ from pathlib import Path, PurePath
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal
 import zlib
+import numpy as np
+import ast
+import csv
 
 from PIL import Image, ImageCms
-from flask import Flask, Response, abort, make_response, render_template, url_for
+from flask import Flask, Response, abort, make_response, render_template, url_for, request, jsonify
 
 if TYPE_CHECKING:
     # Python 3.10+
@@ -92,6 +95,16 @@ class AnnotatedDeepZoomGenerator(DeepZoomGenerator):
     mpp: float
     transform: Transform
 
+colormap_cache = {}
+def load_colormap(path, request):
+    cmap_param = request.args.get('cmap')
+    if cmap_param:
+        cmap = ast.literal_eval(cmap_param)
+        colormap_cache[path] = cmap
+    else:
+        if path in colormap_cache:
+            del colormap_cache[path]
+
 
 def create_app(
     config: dict[str, Any] | None = None,
@@ -138,9 +151,9 @@ def create_app(
         except OSError:
             # Does not exist
             abort(404)
-        if path.parts[: len(app.basedir.parts)] != app.basedir.parts:
-            # Directory traversal
-            abort(404)
+#        if path.parts[: len(app.basedir.parts)] != app.basedir.parts:
+#            # Directory traversal
+#            abort(404)
         try:
             slide = app.cache.get(path)
             slide.filename = path.name
@@ -153,10 +166,47 @@ def create_app(
     def index() -> str:
         return render_template('files.html', root_dir=_Directory(app.basedir))
 
+    @app.route('/viewer')
+    def viewer() -> str:
+        return render_template('view.html', root_dir=_Directory(app.basedir))
+
+    @app.route('/mark_bbox/<path:path>')
+    def mark_bbox(path):
+        # 1. 拼出 CSV 文件全路径
+        csv_file = os.path.join(
+            '/cluster/home/bqhu_jh/projects/panlab/code/wujiangchao/ALLTLS/fig/cell_density',
+            f'pos_{path}.csv'
+        )
+        boxes = []
+        # 2. 读取 CSV，组装 boxes 列表
+        with open(csv_file, newline='') as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                x0 = float(row['x_beg'])
+                y0 = float(row['y_beg'])
+                x1 = float(row['x_end'])
+                y1 = float(row['y_end'])
+                boxes.append({
+                    'x': x0,
+                    'y': y0,
+                    'w': x1 - x0,
+                    'h': y1 - y0,
+                    'label': f'roi_{i}'
+                })
+                if len(boxes) > 5:
+                    break
+                
+        return jsonify(boxes=boxes)
+
+    @app.route('/unmark_bbox/<path:path>')
+    def unmark_bbox(path):
+        return jsonify(success=True)
+
     @app.route('/<path:path>')
     def slide(path: str) -> str:
         slide = get_slide(PurePath(path))
         slide_url = url_for('dzi', path=path)
+        load_colormap(path, request)
         return render_template(
             'slide-fullpage.html',
             slide_url=slide_url,
@@ -167,6 +217,7 @@ def create_app(
     @app.route('/<path:path>.dzi')
     def dzi(path: str) -> Response:
         slide = get_slide(PurePath(path))
+        load_colormap(path, request)
         format = app.config['DEEPZOOM_FORMAT']
         resp = make_response(slide.get_dzi(format))
         resp.mimetype = 'application/xml'
@@ -184,6 +235,11 @@ def create_app(
         except ValueError:
             # Invalid level or coordinates
             abort(404)
+
+        cmap = colormap_cache.get(path)
+        if cmap:
+            tile = apply_colormap(tile, cmap)
+
         slide.transform(tile)
         buf = BytesIO()
         tile.save(
@@ -198,6 +254,89 @@ def create_app(
 
     return app
 
+def apply_colormap(image: Image.Image, cmap: list) -> Image.Image:
+    """
+    Apply colormap to image based on pixel intensity.
+    
+    Args:
+        image: PIL Image (H,W) or (H,W,C)
+        cmap: List of RGB tuples representing colormap [(r1,g1,b1), (r2,g2,b2), ...]
+    
+    Returns:
+        PIL Image with colormap applied (H,W,3)
+    """
+    # Convert PIL image to numpy array
+    img_array = np.array(image)
+    
+    # Handle different image dimensions
+    if len(img_array.shape) == 2:
+        # Grayscale image (H, W)
+        intensity = img_array
+    elif len(img_array.shape) == 3:
+        # Color image (H, W, C) - use mean across channels
+        intensity = np.mean(img_array, axis=2)
+    else:
+        raise ValueError(f"Unsupported image shape: {img_array.shape}")
+    
+    # Normalize intensity to [0, 1]
+    intensity_min = intensity.min()
+    intensity_max = intensity.max()
+    
+    if intensity_max > intensity_min:
+        normalized_intensity = (intensity - intensity_min) / (intensity_max - intensity_min)
+    else:
+        normalized_intensity = np.zeros_like(intensity)
+    
+    # Create output RGB image
+    h, w = intensity.shape
+    rgb_image = np.zeros((h, w, 3), dtype=np.uint8)
+    
+    # Apply colormap interpolation
+    if len(cmap) < 2:
+        # Single color or empty colormap
+        if len(cmap) == 1:
+            rgb_image[:, :] = cmap[0]
+        return Image.fromarray(rgb_image, 'RGB')
+    
+    # Linear interpolation between colormap colors
+    num_segments = len(cmap) - 1
+    segment_size = 1.0 / num_segments
+    
+    for i in range(num_segments):
+        # Define segment boundaries
+        start_val = i * segment_size
+        end_val = (i + 1) * segment_size
+        
+        # Find pixels in this segment
+        if i == num_segments - 1:  # Last segment includes end point
+            mask = (normalized_intensity >= start_val) & (normalized_intensity <= end_val)
+        else:
+            mask = (normalized_intensity >= start_val) & (normalized_intensity < end_val)
+        
+        if not np.any(mask):
+            continue
+        
+        # Get segment colors
+        start_color = np.array(cmap[i])
+        end_color = np.array(cmap[i + 1])
+        
+        # Calculate interpolation weights for pixels in this segment
+        segment_intensity = normalized_intensity[mask]
+        if segment_size > 0:
+            weights = (segment_intensity - start_val) / segment_size
+        else:
+            weights = np.zeros_like(segment_intensity)
+        
+        # Interpolate colors
+        interpolated_colors = (
+            start_color[np.newaxis, :] * (1 - weights[:, np.newaxis]) +
+            end_color[np.newaxis, :] * weights[:, np.newaxis]
+        )
+        
+        # Apply to output image
+        rgb_image[mask] = interpolated_colors.astype(np.uint8)
+    
+    return Image.fromarray(rgb_image, 'RGB')
 
 class _SlideCache:
     def __init__(
