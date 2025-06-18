@@ -37,6 +37,8 @@ import csv
 
 from PIL import Image, ImageCms
 from flask import Flask, Response, abort, make_response, render_template, url_for, request, jsonify
+from dask import array as da
+from tifffile import TiffFile
 
 if TYPE_CHECKING:
     # Python 3.10+
@@ -84,6 +86,11 @@ if TYPE_CHECKING:
     ]
     Transform: TypeAlias = Callable[[Image.Image], None]
 
+def calculate_percentile(file_name, percentile=99):
+    handle = TiffFile(file_name)
+    store = handle.series[-1].levels[-1]
+    np_arr = da.from_zarr(store[0].aszarr()).compute()
+    return np.percentile(np_arr[np_arr>0], percentile)
 
 class DeepZoomMultiServer(Flask):
     basedir: Path
@@ -238,7 +245,7 @@ def create_app(
 
         cmap = colormap_cache.get(path)
         if cmap:
-            tile = apply_colormap(tile, cmap)
+            tile = apply_colormap(tile, cmap, slide.slide_max)
 
         slide.transform(tile)
         buf = BytesIO()
@@ -254,7 +261,7 @@ def create_app(
 
     return app
 
-def apply_colormap(image: Image.Image, cmap: list) -> Image.Image:
+def apply_colormap(image: Image.Image, cmap: list, slide_max: int|float=100) -> Image.Image:
     """
     Apply colormap to image based on pixel intensity.
     
@@ -279,9 +286,9 @@ def apply_colormap(image: Image.Image, cmap: list) -> Image.Image:
         raise ValueError(f"Unsupported image shape: {img_array.shape}")
     
     # Normalize intensity to [0, 1]
-    intensity_min = intensity.min()
-    intensity_max = intensity.max()
-    
+    intensity_min = 0
+    intensity_max = slide_max
+    intensity = np.clip(intensity, intensity_min, intensity_max)
     if intensity_max > intensity_min:
         normalized_intensity = (intensity - intensity_min) / (intensity_max - intensity_min)
     else:
@@ -378,7 +385,8 @@ class _SlideCache:
         except (KeyError, ValueError):
             slide.mpp = 0
         slide.transform = self._get_transform(osr)
-
+        slide.slide_max = calculate_percentile(path, percentile=99.9)
+        print("slide.slide_max:", slide.slide_max)
         with self._lock:
             if path not in self._cache:
                 if len(self._cache) == self.cache_size:
