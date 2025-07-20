@@ -1,0 +1,164 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #000;
+}
+
+#view {
+  width: 100%;
+  height: 100%;
+  margin: 0 auto;
+  position: relative;
+  background: #000;
+  overflow: hidden;
+}
+
+#bbox {
+  pointer-events: none;
+  position: absolute;
+  border: 4px solid currentColor;
+  /* Use color for unified styling */
+  background: transparent;
+  box-sizing: border-box;
+  overflow: visible;
+  /* Allow ::before to not be clipped */
+}
+
+#bbox::before {
+  content: attr(data-label);
+  /* data-label=... dynamically filled */
+  position: absolute;
+  top: -1.5em;
+  left: 0;
+  background: currentColor;
+  color: #fff;
+  padding: 2px 4px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Control panel */
+#controlPanel {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 99999;
+  background: rgba(255, 255, 255, .85);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  max-height: 95%;
+  overflow: auto;
+  box-shadow: 0 0 6px rgba(0, 0, 0, .35);
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.control-row input[type=checkbox] {
+  margin-right: 4px;
+}
+
+.control-row input[type=range] {
+  flex: 1;
+  margin-left: 4px;
+}
+
+#basePathRow {
+  margin-bottom: 6px;
+  white-space: nowrap;
+}
+
+#basePathInput {
+  width: 150px;
+}
+
+.range:disabled {
+  opacity: .4;
+}
+
+.control-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.control-table td {
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid #ddd;
+}
+
+#blendModeRow {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #ccc;
+}
+
+#blendModeSelect {
+  width: 100%;
+  padding: 4px;
+  font-size: 12px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+/* Button styles */
+#tissueToggle {
+  padding: 6px 12px;
+  margin: 2px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+#tissueToggle.active {
+  background: #007bff;
+  color: white;
+  border-color: #0056b3;
+}
+
+#tissueToggle:hover {
+  background: #f8f9fa;
+}
+
+#tissueToggle.active:hover {
+  background: #0056b3;
+}
+
+#cellToggle {
+  padding: 6px 12px;
+  margin: 2px 0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+#cellToggle.active {
+  background: #007bff;
+  color: white;
+  border-color: #0056b3;
+}
+
+#cellToggle:hover {
+  background: #f8f9fa;
+}
+
+#cellToggle.active:hover {
+  background: #0056b3;
+}

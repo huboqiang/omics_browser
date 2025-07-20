@@ -37,6 +37,7 @@ import csv
 
 from PIL import Image, ImageCms
 from flask import Flask, Response, abort, make_response, render_template, url_for, request, jsonify
+import geopandas as gpd
 from dask import array as da
 from tifffile import TiffFile
 
@@ -113,6 +114,117 @@ def load_colormap(path, request):
             del colormap_cache[path]
 
 
+
+def generate_cells_json(gpkg_path, label_prefix=None, label_column=None, crop_region=None, only_center=False):
+    """
+    
+    """
+    if crop_region is None:
+        crop_region = [0, 0, 16000, 16000]
+    
+    x_beg, y_beg, x_end, y_end = crop_region
+    gdf = gpd.read_parquet(gpkg_path)
+    gdf = gdf.cx[x_beg:x_end, y_beg:y_end]
+
+    if 'contour_id' not in gdf.columns:
+        gdf["contour_id"] = range(len(gdf))
+
+    cells = []
+    
+    for idx, row in gdf.iterrows():
+        contour_id = row['contour_id']
+        geometry = row['geometry']
+        
+        # 跳过空几何对象
+        if geometry.is_empty:
+            continue
+        
+        label = str(contour_id)
+        if label_column is not None and label_column in row:
+            label_name = row[label_column]
+            label = f"{label_name}_{contour_id}"
+
+        if label_prefix is not None:
+            label = f"{label_prefix}_{contour_id}"
+        
+        # 处理不同类型的几何对象
+        if geometry.geom_type == 'Polygon':
+            # 单个多边形
+            cell_data = process_polygon(geometry, label, only_center=only_center)
+            if cell_data:
+                cells.append(cell_data)
+                
+        elif geometry.geom_type == 'MultiPolygon':
+            # 多个多边形组成的集合
+            for i, polygon in enumerate(geometry.geoms):
+                polygon_label = f"{label}_{i}" if len(geometry.geoms) > 1 else label
+                cell_data = process_polygon(polygon, polygon_label, only_center=only_center)
+                if cell_data:
+                    cells.append(cell_data)
+    
+    return cells
+
+def process_polygon(polygon, label, only_center=False):
+    """
+    处理单个多边形，包括外边界和内部孔洞
+    
+    参数:
+        polygon: Shapely Polygon对象
+        label: 多边形标签
+    
+    返回:
+        包含vertices和holes信息的字典
+    """
+    if polygon.is_empty:
+        return None
+    
+    # 处理外边界
+    exterior = polygon.exterior
+    coords = list(exterior.coords)
+    if coords[0] == coords[-1]:
+        coords = coords[:-1]
+    
+    vertices = []
+    holes = []
+    if only_center:
+        center = polygon.centroid
+        vertices.append({
+            "x": center.x,
+            "y": center.y
+        })
+    else:
+        for coord in coords:
+            vertices.append({
+                "x": coord[0],
+                "y": coord[1]
+            })
+        
+        for interior in polygon.interiors:
+            hole_coords = list(interior.coords)
+            if hole_coords[0] == hole_coords[-1]:
+                hole_coords = hole_coords[:-1]
+            
+            hole_vertices = []
+            for coord in hole_coords:
+                hole_vertices.append({
+                    "x": coord[0],
+                    "y": coord[1]
+                })
+            
+            if hole_vertices:  # 只添加非空的孔洞
+                holes.append(hole_vertices)
+    
+    cell_data = {
+        "vertices": vertices,
+        "label": label
+    }
+    
+    # 只有当存在孔洞时才添加holes字段
+    if holes:
+        cell_data["holes"] = holes
+    
+    return cell_data
+
 def create_app(
     config: dict[str, Any] | None = None,
     config_file: Path | None = None,
@@ -179,11 +291,7 @@ def create_app(
 
     @app.route('/mark_bbox/<path:path>')
     def mark_bbox(path):
-        # 1. 拼出 CSV 文件全路径
-        csv_file = os.path.join(
-            '/cluster/home/bqhu_jh/projects/panlab/code/wujiangchao/ALLTLS/fig/cell_density',
-            f'pos_{path}.csv'
-        )
+        csv_file = (app.basedir / "../12.roi" / path / "roi.csv").resolve(strict=True)
         boxes = []
         # 2. 读取 CSV，组装 boxes 列表
         with open(csv_file, newline='') as f:
@@ -208,6 +316,42 @@ def create_app(
     @app.route('/unmark_bbox/<path:path>')
     def unmark_bbox(path):
         return jsonify(success=True)
+
+    @app.route('/mark_tissue/<path:path>')
+    def mark_tissue(path):
+        file_tumor = (app.basedir / "../12.roi" / path / "tumor_region.gpd").resolve(strict=True)
+        file_bcell = (app.basedir / "../12.roi" / path / "bcell_region.gpd").resolve(strict=True)
+        dict_tumor_cells = generate_cells_json(file_tumor, "tumor")
+        dict_bcell_cells = generate_cells_json(file_bcell, "bcell")
+        dict_output = dict_tumor_cells + dict_bcell_cells
+        return jsonify(boxes=dict_output)
+
+    @app.route('/unmark_tissue/<path:path>')
+    def unmark_tissue(path):
+        return jsonify(success=True)
+
+    @app.route('/mark_cell/<path:path>')
+    def mark_cell(path):
+        x_beg = request.args.get('x', type=int, default=0)
+        y_beg = request.args.get('y', type=int, default=0)
+        w = request.args.get('w', type=int, default=4000)
+        h = request.args.get('h', type=int, default=4000)
+        x_beg = max(x_beg, 0)
+        y_beg = max(y_beg, 0)
+        h = min(h, 4000)
+        w = min(w, 2*h)
+        
+        crop_region = [x_beg, y_beg, x_beg + w, y_beg + h]
+
+        file_cells = (app.basedir / "../12.roi" / path / "cell_types.parquet").resolve(strict=True)
+        dict_cell_types = generate_cells_json(file_cells, label_column="cell_type", crop_region=crop_region, only_center=True)
+        dict_output = dict_cell_types
+        return jsonify(boxes=dict_output)
+
+    @app.route('/unmark_cell/<path:path>')
+    def unmark_cell(path):
+        return jsonify(success=True)
+
 
     @app.route('/<path:path>')
     def slide(path: str) -> str:
