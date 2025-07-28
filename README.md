@@ -1,3 +1,21 @@
+# Omics browser for omniAligner's agent
+
+This browser is a tool used by [omniAligner](https://github.com/huboqiang/omnialigner/)'s agent.
+
+- show multiple layers of multiplexed results
+- switch to different samples
+- show / go to different ROIs
+- show contours
+
+See https://github.com/huboqiang/omnialigner/blob/master/servers/
+
+## usage
+
+```
+python omics_browser/examples/deepzoom/deepzoom_multiserver.py  -p 5020 -l 0.0.0.0 YOUR_DATA_DIR/analysis/panlab/v1/fig/
+```
+
+
 # OpenSlide Python
 
 OpenSlide Python is a Python interface to the OpenSlide library.
@@ -72,6 +90,8 @@ installing so OpenSlide Python can find OpenSlide.
 
 ## License
 
+- This project links against OpenSlide Python, which is licensed under the GNU Lesser General Public License v2.1. See [LICENSE.LGPL](LICENSE.LGPL) for details.
+
 OpenSlide Python is released under the terms of the [GNU Lesser General
 Public License, version 2.1](https://openslide.org/license/).
 
@@ -79,3 +99,4 @@ OpenSlide Python is distributed in the hope that it will be useful, but
 WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Lesser General Public
 License for more details.
+
