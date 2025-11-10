@@ -61,7 +61,8 @@
 (x, y, w, h) = (–, –, –, –)
 </pre>
 
-    <script src="/static/init_browser.js"></script>
+    <script>window.IHC_LAYER_INFO = {{ ihc_layer_info|tojson }};</script>
+    <script src="{{ url_for('static', filename='init_browser.js') }}"></script>
     <script src="/static/mark_cells.js"></script>
     <script src="/static/button_control.js"></script>
 </body>

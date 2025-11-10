@@ -1,55 +1,68 @@
-    /* ========================
+/* ========================
      * 配置
      * ======================*/
     const BASE_LAYER = 'raw_HE';
-    const channelNames = [
-      BASE_LAYER,
-      "P1_DAPI", 'P1_CD3E', 'P1_MS4A1', 'P1_FCER2', 'P1_LAMP3', 'P1_CR2', 'P1_GLYCAM1', "P1_SampleAF",
-      "P2_DAPI", 'P2_CD274', 'P2_ITGAX', 'P2_TPSAB1', 'P2_HLA-DRA', 'P2_CD163', 'P2_CD68', "P2_SampleAF",
-      "P3_DAPI", 'P3_NCAM1', 'P3_MPO', 'P3_ACTA2', 'P3_MKI67', 'P3_PECAM1', 'P3_PANK1', "P3_SampleAF",
-      "P4_DAPI", 'P4_CD4', 'P4_CD8A', 'P4_FOXP3', 'P4_PDCD1', 'P4_MS4A1', 'P4_IL10', "P4_SampleAF",
-    ];
 
-    const colorMap = {
-        P1_DAPI:    [0, 0, 255],
-        P1_CD3E:   [0, 255, 255],
-        P1_MS4A1: [0, 255,   0],
-        P1_FCER2:    [255, 255, 0],
-        P1_LAMP3:   [255, 165, 0],
-        P1_CR2:   [255,   0, 0],
-        P1_GLYCAM1:     [255, 255, 255],
-        P1_SampleAF:[169, 169, 169],
+// ==== 仅此处改为动态构建 (保留原结构作为回退) ====
+    const channelNames = (() => {
+      const info = (typeof window !== 'undefined') ? window.IHC_LAYER_INFO : null;
+      if (!info || !info.genes) {
+        return [
+          BASE_LAYER,
+          "P1_DAPI", 'P1_CD3E', 'P1_MS4A1', 'P1_FCER2', 'P1_LAMP3', 'P1_CR2', 'P1_GLYCAM1', "P1_SampleAF",
+          "P2_DAPI", 'P2_CD274', 'P2_ITGAX', 'P2_TPSAB1', 'P2_HLA-DRA', 'P2_CD163', 'P2_CD68', "P2_SampleAF",
+          "P3_DAPI", 'P3_NCAM1', 'P3_MPO', 'P3_ACTA2', 'P3_MKI67', 'P3_PECAM1', 'P3_PANK1', "P3_SampleAF",
+          "P4_DAPI", 'P4_CD4', 'P4_CD8A', 'P4_FOXP3', 'P4_PDCD1', 'P4_MS4A1', 'P4_IL10', "P4_SampleAF",
+        ];
+      }
+      const panels = info.genes;
+      const arr = [BASE_LAYER];
+      Object.entries(panels).forEach(([panel, genes]) => {
+        (genes || []).forEach(g => arr.push(`${panel}_${g}`));
+      });
+      return arr;
+    })();
 
-        /* ---------- P2（dark 系） ---------- */
-        P2_DAPI:    [0,   0, 255],
-        P2_CD274:  [0, 200, 200],
-        P2_ITGAX:    [0, 200,   0],
-        P2_TPSAB1:   [200, 200, 0],
-        "P2_HLA-DRA":[205, 133, 0],
-        P2_CD163:   [200,   0, 0],
-        P2_CD68:   [230, 230, 230],
-        P2_SampleAF:[169, 169, 169],
-
-        /* ---------- P3（light 系） ---------- */
-        P3_DAPI:    [0,   0, 255],
-        P3_NCAM1:   [144, 255, 144],
-        P3_MPO:   [102, 255, 255],
-        P3_ACTA2:   [255, 255, 128],
-        P3_MKI67:   [255, 200, 100],
-        P3_PECAM1:     [255, 102, 102],
-        P3_PANK1:  [200, 200, 200],
-        P3_SampleAF:[169, 169, 169],
-
-        /* ---------- P4（shift 系） ---------- */
-        P4_DAPI:    [0,   0, 255],
-        P4_CD4:   [0, 255, 200],
-        P4_CD8A:    [102, 255,   0],
-        P4_FOXP3:     [255, 215,   0],
-        P4_PDCD1:   [255, 140,   0],
-        P4_MS4A1:    [255,  69,   0],
-        P4_IL10:   [245, 245, 245],
-        P4_SampleAF: [169, 169, 169]
-    };
+    const colorMap = (() => {
+      const info = (typeof window !== 'undefined') ? window.IHC_LAYER_INFO : null;
+      // 染料 → 颜色表（按波长）
+      const dyeColorMap = {
+        "DAPI": [0,0,255],
+        "Opal 480": [0,255,255],
+        "Opal 520": [0,255,0],
+        "Opal 570": [255,255,0],
+        "Opal 620": [255,165,0],
+        "Opal 690": [255,0,0],
+        "Opal 780": [255,255,255],
+        "Sample AF": [169,169,169],
+        "SampleAF": [169,169,169]
+      };
+      if (!info || !info.genes) {
+        return {
+          P1_DAPI:[0,0,255], P1_CD3E:[0,255,255], P1_MS4A1:[0,255,0], P1_FCER2:[255,255,0],
+          P1_LAMP3:[255,165,0], P1_CR2:[255,0,0], P1_GLYCAM1:[255,255,255], P1_SampleAF:[169,169,169],
+          P2_DAPI:[0,0,255], P2_CD274:[0,200,200], P2_ITGAX:[0,200,0], P2_TPSAB1:[200,200,0],
+          "P2_HLA-DRA":[205,133,0], P2_CD163:[200,0,0], P2_CD68:[230,230,230], P2_SampleAF:[169,169,169],
+          P3_DAPI:[0,0,255], P3_NCAM1:[144,255,144], P3_MPO:[102,255,255], P3_ACTA2:[255,255,128],
+          P3_MKI67:[255,200,100], P3_PECAM1:[255,102,102], P3_PANK1:[200,200,200], P3_SampleAF:[169,169,169],
+          P4_DAPI:[0,0,255], P4_CD4:[0,255,200], P4_CD8A:[102,255,0], P4_FOXP3:[255,215,0],
+          P4_PDCD1:[255,140,0], P4_MS4A1:[255,69,0], P4_IL10:[245,245,245], P4_SampleAF:[169,169,169]
+        };
+      }
+      const panels = info.genes;
+      const order = info.order_in_browser || info.orderInBrowser || [];
+      const map = {};
+      Object.entries(panels).forEach(([panel, genes]) => {
+        (genes || []).forEach((gene, idx) => {
+          const dye = order[idx]; // 位置对应
+          const ch = `${panel}_${gene}`;
+            // 若 gene 自身就是染料名（如 DAPI）也兼容
+          map[ch] = dyeColorMap[dye] || dyeColorMap[gene] || [150,150,150];
+        });
+      });
+      return map;
+    })();
+// ==== 动态部分结束，以下保持原样 ====
     let currentBlendMode = 'source-over';
 
     /* ========================

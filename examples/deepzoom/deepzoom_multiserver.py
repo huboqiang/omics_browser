@@ -27,6 +27,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from io import BytesIO
 import os
+import json
 from pathlib import Path, PurePath
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal
@@ -287,7 +288,18 @@ def create_app(
 
     @app.route('/viewer')
     def viewer() -> str:
-        return render_template('view.html', root_dir=_Directory(app.basedir))
+        layer_info_path = os.environ.get(
+            'OMICS_LAYER_INFO_JSON',
+            '/cluster/home/bqhu_jh/projects/omnialigner/config/panlab2d/IHC_layer_info.json'
+        )
+        try:
+            with open(layer_info_path, 'r') as f:
+                ihc_layer_info = json.load(f)
+        except Exception as e:
+            ihc_layer_info = {"error": f"Failed to load {layer_info_path}: {e}"}
+        return render_template('view.html',
+                               root_dir=_Directory(app.basedir),
+                               ihc_layer_info=ihc_layer_info)
 
     @app.route('/mark_bbox/<path:path>')
     def mark_bbox(path):
